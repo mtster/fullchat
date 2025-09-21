@@ -1,21 +1,19 @@
-name: Build and Deploy React App to GitHub Pages
+name: Build and deploy React app to GitHub Pages (via Actions)
 
+# Trigger on push to main (change 'main' to 'master' if your default branch is 'master')
 on:
   push:
     branches:
-      - main # <-- change to 'master' if your repo default branch is master
-
-permissions:
-  contents: write
+      - main
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js
+      - name: Use Node.js 18.x
         uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -23,11 +21,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build production bundle
         run: npm run build
 
-      - name: Deploy to GitHub Pages (gh-pages branch)
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Upload build artifacts for Pages
+        uses: actions/upload-pages-artifact@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build
+          path: ./build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1
