@@ -1,79 +1,27 @@
-// src/App.js
 import React from "react";
-import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import AuthProvider, { useAuth } from "./components/AuthProvider";
-import Login from "./components/Login";
-import Register from "./components/Register";
-import ChatList from "./components/ChatList";
-import ChatView from "./components/ChatView";
-import Header from "./components/Header";
+import { Routes, Route, Navigate } from "react-router-dom";
 
-function PrivateRoute({ children }) {
-  const { user } = useAuth();
-  const location = useLocation();
-  if (!user) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-  return children;
-}
+// Import your page components
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import HomePage from "./pages/HomePage";
+import ChatPage from "./pages/ChatPage";
 
-function AppRoutes() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-
-  React.useEffect(() => {
-    // Resume last chat if user returns
-    if (user) {
-      const lastChat = localStorage.getItem("lastChat");
-      if (lastChat) {
-        navigate(`/chats/${lastChat}`, { replace: true });
-      } else {
-        navigate("/chats", { replace: true });
-      }
-    }
-  }, [user, navigate]);
-
+function App() {
   return (
     <Routes>
-      <Route path="/" element={user ? <Navigate to="/chats" /> : <Navigate to="/login" />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      {/* Default route redirects to chats if logged in, or login if not */}
+      <Route path="/" element={<Navigate to="/chats" />} />
 
-      <Route path="/chats" element={
-        <PrivateRoute>
-          <div className="app">
-            <ChatList />
-            <div className="right">
-              <Header />
-              {/* default info area */}
-              <div style={{ padding: 20, color: "var(--muted)" }}>
-                Select a chat from the left or create a new chat.
-              </div>
-            </div>
-          </div>
-        </PrivateRoute>
-      } />
+      {/* Auth pages */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
 
-      <Route path="/chats/:chatId" element={
-        <PrivateRoute>
-          <div className="app">
-            <ChatList />
-            <div className="right">
-              <Header />
-              <ChatView />
-            </div>
-          </div>
-        </PrivateRoute>
-      } />
-      <Route path="*" element={<div style={{padding:30}}>404 - Not Found</div>} />
+      {/* Main pages */}
+      <Route path="/chats" element={<HomePage />} />
+      <Route path="/chats/:chatId" element={<ChatPage />} />
     </Routes>
   );
 }
 
-export default function App() {
-  return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
-  );
-}
+export default App;
