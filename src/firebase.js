@@ -1,9 +1,5 @@
-// src/firebase.js
 import { initializeApp } from "firebase/app";
-import {
-  getFirestore,
-  serverTimestamp
-} from "firebase/firestore";
+import { getFirestore, serverTimestamp } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
