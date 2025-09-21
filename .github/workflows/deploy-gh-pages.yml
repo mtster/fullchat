@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -21,8 +21,8 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (uses npm install because package-lock.json may be missing)
+        run: npm install
 
       - name: Build production bundle
         run: npm run build
@@ -32,5 +32,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build
-          # optional: set a custom commit message
           commit_message: "Deploy from GitHub Actions: ${{ github.sha }}"
