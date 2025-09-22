@@ -1,10 +1,9 @@
 // src/components/NewChatModal.js
+import { rtdb } from "../firebase";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
-import { getApp } from "firebase/app";
 import {
-  getDatabase,
   ref,
   push,
   set,
@@ -15,13 +14,14 @@ import {
 } from "firebase/database";
 
 export default function NewChatModal({ onClose }) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [chatName, setChatName] = useState("");
   const [participantUsernames, setParticipantUsernames] = useState("");
   const [err, setErr] = useState(null);
-  const navigate = useNavigate();
-  const app = getApp();
-  const rdb = getDatabase(app);
+
+  // use the already-initialized rtdb instance
+  const rdb = rtdb;
 
   const createChat = async (e) => {
     e && e.preventDefault();
@@ -33,76 +33,74 @@ export default function NewChatModal({ onClose }) {
       return;
     }
 
-    let arr = (participantUsernames || "")
+    let participants = (participantUsernames || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (!arr.includes(user.username)) arr.push(user.username);
+    // ensure the current user is included
+    if (!participants.includes(user.username)) {
+      participants.push(user.username);
+    }
 
     try {
+      // find participant user ids
       const usersRef = ref(rdb, "users");
-      const foundUsers = [];
-      for (let i = 0; i < arr.length; i++) {
-        const u = arr[i];
-        const q = query(usersRef, orderByChild("username"), equalTo(u));
-        const snap = await get(q);
-        if (!snap.exists()) {
-          setErr(`User not found: ${u}`);
-          return;
-        }
-        const val = snap.val();
-        const firstKey = Object.keys(val)[0];
-        foundUsers.push({ id: firstKey, username: val[firstKey].username });
-      }
+      const usersSnap = await get(usersRef);
+      const usersVal = (usersSnap && usersSnap.val()) || {};
+      const userMap = {};
+      Object.entries(usersVal).forEach(([id, u]) => {
+        if (u && u.username) userMap[u.username] = { id, ...u };
+      });
 
+      const participantIds = participants
+        .map((uname) => userMap[uname])
+        .filter(Boolean)
+        .map((u) => u.id);
+
+      // create chat
       const chatsRef = ref(rdb, "chats");
       const newChatRef = push(chatsRef);
       const chatId = newChatRef.key;
-      const payload = {
+      const chatObj = {
+        id: chatId,
         name,
-        participants: foundUsers.map((f) => f.id),
-        participantUsernames: foundUsers.map((f) => f.username),
+        participants: participantIds,
         createdAt: Date.now(),
-        lastMessage: "",
-        lastMessageAt: Date.now(),
+        createdBy: user.id,
       };
-      await set(newChatRef, payload);
+      await set(newChatRef, chatObj);
 
-      for (const p of foundUsers) {
-        await set(ref(rdb, `userChats/${p.id}/${chatId}`), { chatId, addedAt: Date.now() });
-      }
+      // register chat under each user's userChats
+      await Promise.all(
+        participantIds.map((pid) =>
+          set(ref(rdb, `userChats/${pid}/${chatId}`), { chatId, addedAt: Date.now() })
+        )
+      );
 
-      onClose && onClose();
-      navigate(`/chat/${chatId}`);
-    } catch (error) {
-      console.error("createChat error", error);
-      setErr((error && error.message) || "Failed to create chat.");
+      if (onClose) onClose();
+      navigate(`/chats/${chatId}`);
+    } catch (err) {
+      console.error("createChat error", err);
+      setErr("Failed to create chat");
     }
   };
 
   return (
     <>
-      <div className="modal-overlay" onClick={() => onClose && onClose()} />
-      <div className="modal" style={{ background: "#f3f7fb" }}>
+      <div className="modal-backdrop" />
+      <div className="modal">
         <h3>New Chat</h3>
-        <form onSubmit={createChat}>
-          <div className="field">
-            <label>Chat name</label>
-            <input value={chatName} onChange={(e) => setChatName(e.target.value)} required />
-          </div>
+        <form onSubmit={createChat} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label>
+            Chat name
+            <input value={chatName} onChange={(e) => setChatName(e.target.value)} />
+          </label>
 
-          <div className="field">
-            <label>Invite by username (comma separated)</label>
-            <input
-              value={participantUsernames}
-              onChange={(e) => setParticipantUsernames(e.target.value)}
-              placeholder="alice, bob"
-            />
-            <div className="meta" style={{ marginTop: 6 }}>
-              Your username will be added automatically.
-            </div>
-          </div>
+          <label>
+            Participants (comma-separated usernames)
+            <input value={participantUsernames} onChange={(e) => setParticipantUsernames(e.target.value)} />
+          </label>
 
           {err && <div style={{ color: "salmon", marginBottom: 8 }}>{err}</div>}
 
