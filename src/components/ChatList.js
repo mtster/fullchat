@@ -1,6 +1,5 @@
 // src/components/ChatList.js
 import React, { useEffect, useState } from "react";
-import { db as dummy } from "../firebase"; // keep import for parity if used elsewhere (safe no-op)
 import { useAuth } from "./AuthProvider";
 import { useNavigate, Link } from "react-router-dom";
 import { getApp } from "firebase/app";
@@ -10,19 +9,17 @@ import ChatItem from "./ChatItem";
 
 export default function ChatList() {
   const { user, logout } = useAuth();
-  const [chats, setChats] = useState([]); // objects { id, ... }
+  const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
-  const navigate = useNavigate();
-
   const app = getApp();
   const rdb = getDatabase(app);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!user) return;
     setLoading(true);
 
-    // Listen to userChats for this user
     const userChatsRef = ref(rdb, `userChats/${user.id}`);
     const unsub = onValue(userChatsRef, async (snap) => {
       const val = snap.val();
@@ -31,9 +28,8 @@ export default function ChatList() {
         setLoading(false);
         return;
       }
-      const chatIds = Object.keys(val);
 
-      // fetch each chat object once (you can change to onValue per-chat for real-time updates)
+      const chatIds = Object.keys(val);
       const promises = chatIds.map(async (cid) => {
         const chatSnap = await get(ref(rdb, `chats/${cid}`));
         if (!chatSnap.exists()) return null;
@@ -47,17 +43,20 @@ export default function ChatList() {
     });
 
     return () => unsub();
-  }, [user]);
+  }, [user, rdb]);
 
   if (!user) return null;
 
   return (
     <div style={{ maxWidth: 1000, margin: "12px auto", padding: 12 }}>
-      {/* Top bar (only here) */}
+      {/* Top bar - only here */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div><strong>FRBS Chat</strong></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <strong>FRBS Chat</strong>
+        </div>
+
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <div style={{ fontSize: 14, opacity: 0.9 }}>Logged in as <strong>{user.username}</strong></div>
+          <div style={{ fontSize: 14, opacity: 0.9 }}>Signed in as <strong>{user.username}</strong></div>
           <button className="btn" onClick={() => setShowNewChat(true)}>New chat</button>
           <button className="btn secondary" onClick={() => { logout(); navigate("/login"); }}>Logout</button>
         </div>
