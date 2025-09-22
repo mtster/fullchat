@@ -74,7 +74,7 @@ export default function ChatList() {
         {!loading && chats.length > 0 && (
           <div className="chat-list">
             {chats.map((c) => (
-              <Link key={c.id} to={`/chat/${c.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <Link key={c.id} to={`/chats/${c.id}`} style={{ textDecoration: "none", color: "inherit" }}>
                 <ChatItem chat={c} />
               </Link>
             ))}
