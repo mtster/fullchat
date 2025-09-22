@@ -151,7 +151,7 @@ body {
 
 
 
-/* Modal overlay and panel — keeps your color scheme intact */
+/* Modal overlay and panel */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -168,7 +168,7 @@ body {
   top: 50%;
   transform: translate(-50%, -50%);
   z-index: 1000;
-  background: white;
+  background: #f3f7fb; /* soft chat-like background instead of plain white */
   padding: 18px;
   border-radius: 10px;
   min-width: 320px;
@@ -176,15 +176,21 @@ body {
   box-shadow: 0 8px 30px rgba(0,0,0,0.2);
 }
 
-/* small responsive tweaks */
-@media (max-width: 520px) {
-  .modal {
-    left: 50%;
-    top: 48%;
-    transform: translate(-50%, -48%);
-    width: calc(100% - 28px);
-  }
+/* Chat list small improvements */
+.chat-list {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  overflow: hidden;
 }
+
+/* inputs/buttons kept as your theme; minor spacing */
+.field { margin-bottom: 12px; }
+.field label { display:block; margin-bottom:6px; color:#333; font-size:14px; }
+.field input { width:100%; padding:8px 10px; border-radius:6px; border:1px solid #ddd; }
+
+/* keep buttons same classes as before */
+.btn { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; }
+.btn.secondary { background: #f2f2f2; }
 
 
 
