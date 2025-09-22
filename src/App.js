@@ -1,6 +1,6 @@
 // src/App.js
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import Login from "./components/Login";
 import Register from "./components/Register";
@@ -74,9 +74,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
+      <AppRoutes />
     </AuthProvider>
   );
 }
