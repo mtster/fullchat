@@ -81,7 +81,7 @@ export default function ChatView() {
 
     return () => {
       unsubChat && unsubChat();
-      activeUnsub && activeUnsub();
+      try { activeUnsub && activeUnsub(); } catch (e) {}
     };
   }, [chatId, rdb]);
 
