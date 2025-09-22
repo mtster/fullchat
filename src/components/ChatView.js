@@ -1,145 +1,120 @@
 // src/components/ChatView.js
 import React, { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
-import { db, serverTimestamp } from "../firebase";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  addDoc,
-  doc,
-  getDoc,
-  updateDoc,
-  getDocs,
-  startAfter
-} from "firebase/firestore";
+import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { getApp } from "firebase/app";
+import { getDatabase, ref, onValue, push, set } from "firebase/database";
 
 export default function ChatView() {
-  const { chatId } = useParams();
+  const { id } = useParams(); // chat id
   const { user } = useAuth();
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [text, setText] = useState("");
+  const navigate = useNavigate();
   const scrollRef = useRef();
-  const lastVisibleRef = useRef(null);
+  const app = getApp();
+  const rdb = getDatabase(app);
 
   useEffect(() => {
-    if (!chatId) return;
-    // fetch chat meta doc
-    const chatRef = doc(db, "chats", chatId);
-    let unsubChat = () => {};
-    const loadChat = async () => {
-      const snap = await getDoc(chatRef);
-      if (snap.exists()) {
-        setChat({ id: snap.id, ...snap.data() });
-      } else {
-        setChat(null);
-      }
-      unsubChat = onSnapshot(chatRef, s => {
-        if (s.exists()) setChat({ id: s.id, ...s.data() });
-      });
-    };
-    loadChat();
-    return () => {
-      try { unsubChat(); } catch(e){}
-    };
-  }, [chatId]);
-
-  useEffect(() => {
-    if (!chatId) return;
-    // real-time messages (most recent 50)
-    const messagesRef = collection(db, "messages");
-    const q = query(messagesRef, where("chatId", "==", chatId), orderBy("timestamp", "desc"), limit(50));
-    const unsub = onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // since we queried desc, reverse for display
-      docs.reverse();
-      setMessages(docs);
-      lastVisibleRef.current = snap.docs[snap.docs.length - 1];
-      setHasMore(snap.docs.length === 50); // if equal to limit, assume there may be more
-      // scroll to bottom
-      setTimeout(()=> {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }, 100);
+    if (!id) return;
+    // listen for chat data
+    const chatRef = ref(rdb, `chats/${id}`);
+    const unsubChat = onValue(chatRef, (snap) => {
+      setChat(snap.exists() ? snap.val() : null);
     });
-    return () => unsub();
-  }, [chatId]);
+
+    // listen for messages under messages/{chatId}
+    const messagesRef = ref(rdb, `messages/${id}`);
+    const unsubMsg = onValue(messagesRef, (snap) => {
+      const val = snap.val();
+      if (!val) {
+        setMessages([]);
+        return;
+      }
+      // convert to ordered array by key order (or timestamp if stored)
+      const arr = Object.keys(val).map((k) => ({ id: k, ...(val[k] || {}) }));
+      arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      setMessages(arr);
+      // auto-scroll
+      setTimeout(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, 50);
+    });
+
+    return () => {
+      unsubChat && unsubChat();
+      unsubMsg && unsubMsg();
+    };
+  }, [id]);
+
+  if (!user) {
+    return null;
+  }
 
   const sendMessage = async (e) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    const messagesRef = collection(db, "messages");
-    const newMsg = {
-      chatId,
+    e && e.preventDefault();
+    const txt = (text || "").trim();
+    if (!txt) return;
+    const messagesRef = ref(rdb, `messages/${id}`);
+    const newMsgRef = push(messagesRef);
+    await set(newMsgRef, {
       senderId: user.id,
-      message: input.trim(),
-      timestamp: serverTimestamp()
-    };
-    await addDoc(messagesRef, newMsg);
-    // update chat lastMessage & timestamp
-    const chatRef = doc(db, "chats", chatId);
-    await updateDoc(chatRef, { lastMessage: input.trim(), timestamp: serverTimestamp() });
-    setInput("");
-    // after sending, lastMessage will update via onSnapshot, and left chat list updates by its subscription
-  };
+      senderUsername: user.username,
+      text: txt,
+      createdAt: Date.now(),
+    });
 
-  const loadOlder = async () => {
-    if (!hasMore || loadingOlder) return;
-    setLoadingOlder(true);
-    const messagesRef = collection(db, "messages");
-    // query older than lastVisibleRef (which is oldest currently loaded)
-    if (!lastVisibleRef.current) {
-      setLoadingOlder(false);
-      return;
-    }
-    const q = query(messagesRef, where("chatId", "==", chatId), orderBy("timestamp", "desc"), startAfter(lastVisibleRef.current), limit(50));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      setHasMore(false);
-    } else {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse();
-      setMessages(prev => [...docs, ...prev]);
-      lastVisibleRef.current = snap.docs[snap.docs.length - 1];
-      setHasMore(snap.docs.length === 50);
-    }
-    setLoadingOlder(false);
+    // update chat lastMessage / lastMessageAt
+    const chatRef = ref(rdb, `chats/${id}`);
+    await set(ref(rdb, `chats/${id}/lastMessage`), txt).catch(()=>{});
+    await set(ref(rdb, `chats/${id}/lastMessageAt`), Date.now()).catch(()=>{});
+
+    setText("");
   };
 
   return (
-    <>
-      <div style={{padding:12, borderBottom:"1px solid rgba(255,255,255,0.02)"}}>
-        <div style={{fontSize:16, fontWeight:700}}>{chat ? chat.chatName : "Chat"}</div>
-        <div style={{color:"var(--muted)", fontSize:12}}>
-          {chat ? (chat.participants && chat.participants.length ? `${chat.participants.length} participants` : "") : ""}
+    <div style={{ maxWidth: 1000, margin: "8px auto", padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <button className="btn" onClick={() => navigate(-1)}>Back</button>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>
+          {chat ? chat.name : "Chat"}
+        </div>
+        <div style={{ marginLeft: "auto", opacity: 0.8 }}>
+          {chat && chat.participantUsernames ? chat.participantUsernames.join(", ") : ""}
         </div>
       </div>
 
-      <div ref={scrollRef} className="messages">
-        {hasMore && <div style={{textAlign:"center"}}><button className="btn secondary" onClick={loadOlder}>{loadingOlder ? "Loading..." : "Load older messages"}</button></div>}
-        {messages.map(m => (
-          <div key={m.id} className={`message ${m.senderId === user.id ? "msg-me" : "msg-other"}`}>
-            <div style={{fontSize:12, opacity:0.9}}>{m.message}</div>
-            <div style={{fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:6, textAlign:"right"}}>
-              {m.timestamp && m.timestamp.toDate ? m.timestamp.toDate().toLocaleString() : ""}
+      {/* Messages area */}
+      <div ref={scrollRef} style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, height: "60vh", overflowY: "auto", marginBottom: 12 }}>
+        {messages.length === 0 && (
+          <div style={{ color: "#777", textAlign: "center", marginTop: 24 }}>No messages yet — say hi 👋</div>
+        )}
+        {messages.map((m) => {
+          const mine = m.senderId === user.id;
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+              <div style={{
+                maxWidth: "75%",
+                padding: "8px 12px",
+                borderRadius: 16,
+                background: mine ? "#DCF8C6" : "#fff",
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.03)"
+              }}>
+                <div style={{ fontSize: 14, marginBottom: 6 }}>{m.text}</div>
+                <div style={{ fontSize: 11, color: "#999", textAlign: "right" }}>
+                  {m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : ""}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <form className="input-area" onSubmit={sendMessage}>
-        <input
-          type="text"
-          placeholder="Write a message..."
-          value={input}
-          onChange={e=>setInput(e.target.value)} />
+      <form onSubmit={sendMessage} style={{ display: "flex", gap: 8 }}>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message" />
         <button className="btn" type="submit">Send</button>
       </form>
-    </>
+    </div>
   );
 }
