@@ -1,8 +1,8 @@
 // src/components/ChatList.js
-import { rtdb } from "../firebase";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
-import { useNavigate, Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { rtdb } from "../firebase";
 import { ref, onValue, get } from "firebase/database";
 import NewChatModal from "./NewChatModal";
 import ChatItem from "./ChatItem";
@@ -12,9 +12,7 @@ export default function ChatList() {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
-
-  // use the already-initialized rtdb instance
-  const rdb = rtdb;
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!user) {
@@ -23,27 +21,43 @@ export default function ChatList() {
       return;
     }
     setLoading(true);
-    const userChatsRef = ref(rdb, `userChats/${user.id}`);
+    const userChatsRef = ref(rtdb, `userChats/${user.id}`);
+
     const unsub = onValue(userChatsRef, async (snapshot) => {
       const val = snapshot.val() || {};
       const chatIds = Object.keys(val || {});
-      // fetch chat details in parallel
-      const chatPromises = chatIds.map(async (cid) => {
-        const chatSnap = await get(ref(rdb, `chats/${cid}`));
-        return chatSnap.exists() ? { id: cid, ...chatSnap.val() } : null;
-      });
-      const chatResults = (await Promise.all(chatPromises)).filter(Boolean);
-      setChats(chatResults);
-      setLoading(false);
+      // fetch chats
+      try {
+        const chatPromises = chatIds.map(async (cid) => {
+          const snap = await get(ref(rtdb, `chats/${cid}`));
+          if (!snap || !snap.exists()) return null;
+          return { id: cid, ...snap.val() };
+        });
+        const results = (await Promise.all(chatPromises)).filter(Boolean);
+        // sort by lastMessageAt desc
+        results.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+        setChats(results);
+      } catch (err) {
+        console.error("ChatList: error fetching chats", err);
+        setChats([]);
+      } finally {
+        setLoading(false);
+      }
     });
-    return () => unsub();
-  }, [user, rdb]);
+
+    return () => {
+      try {
+        unsub();
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, [user]);
 
   if (!user) return null;
 
   return (
     <div style={{ maxWidth: 1000, margin: "12px auto", padding: 12 }}>
-      {/* Top bar - only here */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <strong>FRBS Chat</strong>
@@ -52,12 +66,21 @@ export default function ChatList() {
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <div style={{ fontSize: 14, opacity: 0.9 }}>Signed in as <strong>{user.username}</strong></div>
           <button className="btn" onClick={() => setShowNewChat(true)}>New chat</button>
-          <button className="btn secondary" onClick={() => { logout(); }}>Logout</button>
+          <button
+            className="btn secondary"
+            onClick={() => {
+              logout();
+              // go to login
+              navigate("/login", { replace: true });
+            }}
+          >
+            Logout
+          </button>
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ width: 300 }}>
+        <div style={{ width: 320 }}>
           {loading ? (
             <div>Loading chats...</div>
           ) : (
@@ -67,12 +90,13 @@ export default function ChatList() {
                   <ChatItem chat={c} />
                 </Link>
               ))}
+              {chats.length === 0 && <div style={{ padding: 12, color: "#666" }}>No chats yet</div>}
             </div>
           )}
         </div>
 
         <div style={{ flex: 1 }}>
-          {/* main chat view will render via router */}
+          {/* main chat view is displayed by the router */}
         </div>
       </div>
 
