@@ -58,7 +58,7 @@ export default function ChatList() {
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <div style={{ fontSize: 14, opacity: 0.9 }}>Signed in as <strong>{user.username}</strong></div>
           <button className="btn" onClick={() => setShowNewChat(true)}>New chat</button>
-          <button className="btn secondary" onClick={() => { logout(); navigate("/login"); }}>Logout</button>
+          <button className="btn secondary" onClick={() => { logout(); navigate("/#/login"); window.location.hash = "/login"; }}>Logout</button>
         </div>
       </div>
 
