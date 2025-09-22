@@ -6,10 +6,11 @@ import { rtdb } from "../firebase";
 import { ref, onValue, push, set, get } from "firebase/database";
 
 /**
- * ChatView - subscribes to messages for a chat and allows sending messages.
- * - tolerant to different possible message path locations
- * - uses the single rtdb export from src/firebase.js (initialized once)
- * - avoids unhandled promise rejections by catching errors
+ * ChatView - robust chat UI:
+ * - finds the messages path for the chat (tolerant)
+ * - subscribes to messages at that path
+ * - stores discovered messagesPath in state so sendMessage writes to same path
+ * - updates chat metadata (lastMessage, lastMessageAt)
  */
 
 const POSSIBLE_MESSAGE_PATHS = [
@@ -25,37 +26,37 @@ export default function ChatView() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [messages, setMessages] = useState([]);
   const [chat, setChat] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [messagesPath, setMessagesPath] = useState(null);
   const [error, setError] = useState(null);
-
   const listRef = useRef(null);
 
   useEffect(() => {
     if (!chatId || !user) return;
+    let detached = false;
+    let unsubMessages = null;
+    let unsubChat = null;
 
-    let unsub = null;
-    let mounted = true;
-
-    async function findMessagesPathAndSubscribe() {
+    async function setup() {
       try {
-        // ensure chat exists
-        const chatSnap = await get(ref(rtdb, `chats/${chatId}`));
-        if (!chatSnap || !chatSnap.exists()) {
-          if (mounted) {
+        // chat metadata subscription
+        const chatRef = ref(rtdb, `chats/${chatId}`);
+        unsubChat = onValue(chatRef, (snap) => {
+          if (!snap || !snap.exists()) {
             setChat(null);
-            navigate("/");
+            // redirect if chat disappears
+            navigate("/", { replace: true });
+            return;
           }
-          return;
-        }
-        if (mounted) setChat({ id: chatId, ...chatSnap.val() });
+          setChat({ id: chatId, ...(snap.val() || {}) });
+        });
 
-        // find a path that currently has messages (or pick default)
+        // attempt to find a messages path
         let foundPath = null;
-        for (const pFn of POSSIBLE_MESSAGE_PATHS) {
-          const candidate = pFn(chatId);
+        for (const fn of POSSIBLE_MESSAGE_PATHS) {
+          const candidate = fn(chatId);
           const snap = await get(ref(rtdb, candidate));
           if (snap && snap.exists()) {
             foundPath = candidate;
@@ -63,84 +64,76 @@ export default function ChatView() {
           }
         }
         if (!foundPath) {
-          // default fallback
+          // fallback default
           foundPath = `messages/${chatId}`;
         }
-
-        if (!mounted) return;
+        if (detached) return;
         setMessagesPath(foundPath);
 
-        // attach listener
-        unsub = onValue(ref(rtdb, foundPath), (snapshot) => {
+        // subscribe to messages
+        unsubMessages = onValue(ref(rtdb, foundPath), (snap) => {
           try {
-            const val = snapshot.val() || {};
-            // messages might be keyed by push keys or by numeric index
+            const val = snap.val() || {};
             const arr = Object.entries(val).map(([id, v]) => {
-              // keep id for rendering; preserve existing fields
               if (v && typeof v === "object") return { id, ...v };
               return { id, message: String(v), timestamp: Date.now() };
             });
             arr.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             setMessages(arr);
-
-            // scroll to bottom after render
+            // scroll down a little after new messages
             setTimeout(() => {
-              if (listRef.current) {
-                listRef.current.scrollTop = listRef.current.scrollHeight;
-              }
-            }, 50);
-          } catch (innerErr) {
-            console.error("ChatView onValue handler error:", innerErr);
+              if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+            }, 60);
+          } catch (err) {
+            console.error("ChatView: messages onValue handler error", err);
           }
         }, (listenErr) => {
-          console.error("ChatView onValue failed to attach:", listenErr);
-          setError("Failed to subscribe to messages.");
+          console.error("ChatView: failed to attach message listener", listenErr);
+          setError("Failed to subscribe to messages");
         });
+
       } catch (err) {
-        console.error("ChatView setup error:", err);
-        setError("Unable to load chat.");
+        console.error("ChatView setup error", err);
+        setError("Unable to load chat messages");
       }
     }
 
-    findMessagesPathAndSubscribe();
+    setup();
 
     return () => {
-      mounted = false;
-      if (typeof unsub === "function") {
-        try { unsub(); } catch (e) { /* ignore */ }
-      }
+      detached = true;
+      try { if (typeof unsubMessages === "function") unsubMessages(); } catch(_) {}
+      try { if (typeof unsubChat === "function") unsubChat(); } catch(_) {}
     };
   }, [chatId, user, navigate]);
 
   async function sendMessage(e) {
-    if (e && e.preventDefault) e.preventDefault();
+    e && e.preventDefault();
     setError(null);
-
     if (!text || !text.trim() || !chatId || !user) return;
-    const txt = text.trim();
+    const toSend = text.trim();
     setText("");
-
     try {
-      const pathToUse = messagesPath || `messages/${chatId}`;
-      const newRef = push(ref(rtdb, pathToUse));
+      const path = messagesPath || `messages/${chatId}`;
+      const newRef = push(ref(rtdb, path));
       await set(newRef, {
         senderId: user.id,
         senderUsername: user.username || null,
-        message: txt,
+        message: toSend,
         timestamp: Date.now(),
       });
 
-      // best-effort: update chat metadata (not fatal)
+      // best-effort update chat metadata
       try {
-        await set(ref(rtdb, `chats/${chatId}/lastMessage`), txt);
+        await set(ref(rtdb, `chats/${chatId}/lastMessage`), toSend);
         await set(ref(rtdb, `chats/${chatId}/lastMessageAt`), Date.now());
       } catch (metaErr) {
-        // ignore metadata update errors
-        console.warn("Failed to update chat metadata:", metaErr);
+        // silently ignore metadata failures
+        console.warn("ChatView: failed to update chat metadata", metaErr);
       }
     } catch (err) {
-      console.error("sendMessage error:", err);
-      setError("Failed to send message.");
+      console.error("ChatView: sendMessage error", err);
+      setError("Failed to send message");
     }
   }
 
@@ -149,48 +142,27 @@ export default function ChatView() {
 
   return (
     <div style={{ padding: 12 }}>
-      <div style={{ marginBottom: 8 }}>
-        <strong>{chat.name || `Chat ${chat.id}`}</strong>
+      <div style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
+        <button className="btn" onClick={() => navigate(-1)}>Back</button>
+        <div style={{ fontWeight: 600 }}>{chat.name || `Chat ${chat.id}`}</div>
+        <div style={{ marginLeft: "auto", opacity: 0.8 }}>
+          {chat && chat.participantUsernames ? chat.participantUsernames.join(", ") : ""}
+        </div>
       </div>
 
       {error && <div style={{ color: "salmon", marginBottom: 8 }}>{error}</div>}
 
-      <div
-        ref={listRef}
-        style={{
-          maxHeight: 400,
-          overflow: "auto",
-          border: "1px solid #eee",
-          padding: 8,
-          marginBottom: 8,
-          background: "#fafafa",
-        }}
-      >
+      <div ref={listRef} style={{ maxHeight: 420, overflow: "auto", border: "1px solid #eee", padding: 8, marginBottom: 8, background: "#fafafa" }}>
         {messages.length === 0 ? (
-          <div style={{ opacity: 0.7 }}>No messages yet — say hi 👋</div>
+          <div style={{ opacity: 0.7, textAlign: "center", padding: 16 }}>No messages yet — say hi 👋</div>
         ) : (
           messages.map((m) => {
             const mine = m.senderId === user.id;
             return (
-              <div
-                key={m.id}
-                style={{
-                  display: "flex",
-                  justifyContent: mine ? "flex-end" : "flex-start",
-                  marginBottom: 6,
-                }}
-              >
-                <div
-                  style={{
-                    maxWidth: "70%",
-                    background: mine ? "#dcf8c6" : "#fff",
-                    padding: 8,
-                    borderRadius: 6,
-                    boxShadow: "0 0 0 1px rgba(0,0,0,0.03)",
-                  }}
-                >
-                  <div style={{ fontSize: 14, marginBottom: 4 }}>{m.message}</div>
-                  <div style={{ fontSize: 10, opacity: 0.6 }}>
+              <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 6 }}>
+                <div style={{ maxWidth: "70%", background: mine ? "#dcf8c6" : "#fff", padding: 8, borderRadius: 6, boxShadow: "0 0 0 1px rgba(0,0,0,0.03)" }}>
+                  <div style={{ marginBottom: 6 }}>{m.message}</div>
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>
                     {m.senderUsername ? `${m.senderUsername} • ` : ""}
                     {m.timestamp ? new Date(m.timestamp).toLocaleString() : ""}
                   </div>
@@ -202,15 +174,8 @@ export default function ChatView() {
       </div>
 
       <form onSubmit={sendMessage} style={{ display: "flex", gap: 8 }}>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Type a message"
-          style={{ flex: 1 }}
-        />
-        <button className="btn" type="submit">
-          Send
-        </button>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type a message" style={{ flex: 1 }} />
+        <button className="btn" type="submit">Send</button>
       </form>
     </div>
   );
