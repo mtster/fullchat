@@ -203,3 +203,13 @@ body {
   .right { height: 60vh; }
   .chat-item { padding:10px; }
 }
+
+
+
+
+/* ====== debug error overlay styles (safe to append) ====== */
+#global-error-banner {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  word-break: break-word;
+}
+
