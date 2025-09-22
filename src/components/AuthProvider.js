@@ -3,83 +3,112 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { db, serverTimestamp } from "../firebase";
 import {
   collection,
-  doc,
-  getDoc,
-  setDoc,
   query,
   where,
   getDocs,
+  addDoc,
   onSnapshot,
-  updateDoc,
-  arrayUnion
+  doc,
+  getDoc
 } from "firebase/firestore";
 
 const AuthContext = createContext();
 
-export function useAuth() { return useContext(AuthContext); }
+export function useAuth() {
+  return useContext(AuthContext);
+}
 
 export default function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(null); // { id, username }
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem("frbs_user");
-    if (saved) {
-      try {
-        setUser(JSON.parse(saved));
-      } catch (e) {
-        localStorage.removeItem("frbs_user");
+    // load from localStorage if present
+    try {
+      const s = localStorage.getItem("frbs_user");
+      if (s) {
+        setUser(JSON.parse(s));
       }
+    } catch (err) {
+      console.warn("AuthProvider: failed to parse local storage user", err);
+    } finally {
+      setInitializing(false);
     }
-    setInitializing(false);
   }, []);
 
+  // register: create a user document in Firestore in `users` collection
+  // returns created user object or throws Error
   const register = async ({ username, password }) => {
-    // enforce unique username
+    username = (username || "").trim();
+    password = (password || "").trim();
+    if (!username || !password) {
+      throw new Error("Username and password are required.");
+    }
+
+    // Check username availability
     const usersRef = collection(db, "users");
     const q = query(usersRef, where("username", "==", username));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      throw new Error("Username already exists");
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+      throw new Error("User already exists.");
     }
-    // create user doc with plain-text password per request warning
-    const newUserRef = doc(usersRef); // auto id
-    const userObj = {
-      id: newUserRef.id,
+
+    // Create user doc
+    const payload = {
       username,
-      password,
-      chatIds: [],
+      password, // NOTE: original project stores plaintext. Keep same behavior.
       createdAt: serverTimestamp()
     };
-    await setDoc(newUserRef, userObj);
-    // set local session
-    setUser({ id: newUserRef.id, username });
-    localStorage.setItem("frbs_user", JSON.stringify({ id: newUserRef.id, username }));
-    return { id: newUserRef.id, username };
+    const docRef = await addDoc(usersRef, payload);
+
+    const created = { id: docRef.id, username };
+
+    // persist locally (session)
+    localStorage.setItem("frbs_user", JSON.stringify(created));
+    setUser(created);
+    return created;
   };
 
+  // login: match username + password against Firestore users
   const login = async ({ username, password }) => {
+    username = (username || "").trim();
+    password = (password || "").trim();
+    if (!username || !password) {
+      throw new Error("Username and password are required.");
+    }
+
     const usersRef = collection(db, "users");
     const q = query(usersRef, where("username", "==", username));
-    const snap = await getDocs(q);
-    if (snap.empty) throw new Error("User not found");
-    const docSnap = snap.docs[0];
-    const data = docSnap.data();
-    if (data.password !== password) {
-      throw new Error("Incorrect password");
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) {
+      throw new Error("User not found.");
     }
-    setUser({ id: docSnap.id, username: data.username });
-    localStorage.setItem("frbs_user", JSON.stringify({ id: docSnap.id, username: data.username }));
-    return { id: docSnap.id, username: data.username };
+
+    // find a doc with matching password
+    let found = null;
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.password === password) {
+        found = { id: docSnap.id, username: data.username };
+      }
+    });
+
+    if (!found) {
+      throw new Error("Invalid password.");
+    }
+
+    localStorage.setItem("frbs_user", JSON.stringify(found));
+    setUser(found);
+    return found;
   };
 
   const logout = () => {
     setUser(null);
     localStorage.removeItem("frbs_user");
-    // also clear lastChat
     localStorage.removeItem("lastChat");
   };
 
   const value = { user, register, login, logout, initializing };
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
