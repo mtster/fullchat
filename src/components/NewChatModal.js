@@ -20,7 +20,6 @@ export default function NewChatModal({ onClose }) {
   const [participantUsernames, setParticipantUsernames] = useState("");
   const [err, setErr] = useState(null);
   const navigate = useNavigate();
-
   const app = getApp();
   const rdb = getDatabase(app);
 
@@ -39,13 +38,11 @@ export default function NewChatModal({ onClose }) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // Ensure current user username is included
     if (!arr.includes(user.username)) arr.push(user.username);
 
-    // Resolve usernames -> user ids
     try {
       const usersRef = ref(rdb, "users");
-      const foundUsers = []; // { id, username }
+      const foundUsers = [];
       for (let i = 0; i < arr.length; i++) {
         const u = arr[i];
         const q = query(usersRef, orderByChild("username"), equalTo(u));
@@ -55,12 +52,10 @@ export default function NewChatModal({ onClose }) {
           return;
         }
         const val = snap.val();
-        // take first matching record
         const firstKey = Object.keys(val)[0];
         foundUsers.push({ id: firstKey, username: val[firstKey].username });
       }
 
-      // Create chat under /chats
       const chatsRef = ref(rdb, "chats");
       const newChatRef = push(chatsRef);
       const chatId = newChatRef.key;
@@ -74,27 +69,22 @@ export default function NewChatModal({ onClose }) {
       };
       await set(newChatRef, payload);
 
-      // Map chat to each user in /userChats/{uid}/{chatId} = true
       for (const p of foundUsers) {
-        const userChatRef = ref(rdb, `userChats/${p.id}/${chatId}`);
-        await set(userChatRef, {
-          chatId,
-          addedAt: Date.now(),
-        });
+        await set(ref(rdb, `userChats/${p.id}/${chatId}`), { chatId, addedAt: Date.now() });
       }
 
       onClose && onClose();
       navigate(`/chat/${chatId}`);
     } catch (error) {
       console.error("createChat error", error);
-      setErr(error.message || "Failed to create chat.");
+      setErr((error && error.message) || "Failed to create chat.");
     }
   };
 
   return (
     <>
       <div className="modal-overlay" onClick={() => onClose && onClose()} />
-      <div className="modal">
+      <div className="modal" style={{ background: "#f3f7fb" }}>
         <h3>New Chat</h3>
         <form onSubmit={createChat}>
           <div className="field">
@@ -110,7 +100,7 @@ export default function NewChatModal({ onClose }) {
               placeholder="alice, bob"
             />
             <div className="meta" style={{ marginTop: 6 }}>
-              Your username will be added automatically if you don't include it.
+              Your username will be added automatically.
             </div>
           </div>
 
