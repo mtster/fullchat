@@ -1,12 +1,12 @@
 // src/App.js
 import React from "react";
-import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import Login from "./components/Login";
 import Register from "./components/Register";
 import ChatList from "./components/ChatList";
 import ChatView from "./components/ChatView";
-// Header import intentionally removed from rendering to avoid duplicate top bars
+// Header intentionally not injected here to avoid duplicate header rows
 
 function PrivateRoute({ children }) {
   const { user } = useAuth();
@@ -74,7 +74,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <Router>
+        <AppRoutes />
+      </Router>
     </AuthProvider>
   );
 }
