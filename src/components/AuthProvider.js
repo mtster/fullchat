@@ -1,6 +1,6 @@
 // src/components/AuthProvider.js
-import { rtdb } from "../firebase";
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { rtdb } from "../firebase";
 import {
   ref,
   push,
@@ -16,66 +16,83 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function AuthProvider({ children }) {
+export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [initializing, setInitializing] = useState(true);
 
-  // use the already-initialized rtdb instance
-  const rdb = rtdb;
-
   useEffect(() => {
-    // try to load stored user from localStorage
     try {
       const raw = localStorage.getItem("frbs_user");
       if (raw) {
         setUser(JSON.parse(raw));
       }
-    } catch (e) {
-      console.error("Failed reading stored user", e);
+    } catch (err) {
+      console.warn("AuthProvider: localStorage parse failed", err);
+    } finally {
+      setInitializing(false);
     }
-    setInitializing(false);
   }, []);
 
+  // Register: create a user node under /users and persist local
   const register = async ({ username, password }) => {
+    username = (username || "").trim();
+    password = (password || "").trim();
     if (!username || !password) {
-      throw new Error("username and password required");
+      throw new Error("Username and password are required.");
     }
-    const usersRef = ref(rdb, "users");
-    // check whether username exists
+
+    // Check username availability
+    const usersRef = ref(rtdb, "users");
     const q = query(usersRef, orderByChild("username"), equalTo(username));
     const snap = await get(q);
     if (snap && snap.exists()) {
-      throw new Error("username taken");
+      throw new Error("User already exists.");
     }
-    // create user
+
+    // Create user entry
     const newUserRef = push(usersRef);
-    const userId = newUserRef.key;
-    const userObj = { id: userId, username, password, createdAt: Date.now() };
-    await set(newUserRef, userObj);
-    localStorage.setItem("frbs_user", JSON.stringify(userObj));
-    setUser(userObj);
-    return userObj;
+    const uid = newUserRef.key;
+    const payload = {
+      username,
+      password, // plaintext here to keep parity with current app (not secure, but matches existing behaviour)
+      createdAt: Date.now(),
+    };
+    await set(newUserRef, payload);
+
+    const created = { id: uid, username };
+    localStorage.setItem("frbs_user", JSON.stringify(created));
+    setUser(created);
+    return created;
   };
 
+  // Login: find user by username then validate password
   const login = async ({ username, password }) => {
+    username = (username || "").trim();
+    password = (password || "").trim();
     if (!username || !password) {
-      throw new Error("username and password required");
+      throw new Error("Username and password are required.");
     }
-    const usersRef = ref(rdb, "users");
+
+    const usersRef = ref(rtdb, "users");
     const q = query(usersRef, orderByChild("username"), equalTo(username));
     const snap = await get(q);
     if (!snap || !snap.exists()) {
-      throw new Error("user not found");
+      throw new Error("User not found.");
     }
-    // find the user object with matching password
+
+    const val = snap.val();
     let found = null;
-    snap.forEach((child) => {
-      const val = child.val();
-      if (val.username === username && val.password === password) {
-        found = val;
+    for (const key of Object.keys(val)) {
+      const u = val[key];
+      if (u.password === password) {
+        found = { id: key, username: u.username };
+        break;
       }
-    });
-    if (!found) throw new Error("invalid credentials");
+    }
+    if (!found) {
+      throw new Error("Invalid password.");
+    }
+
     localStorage.setItem("frbs_user", JSON.stringify(found));
     setUser(found);
     return found;
@@ -90,5 +107,3 @@ export function AuthProvider({ children }) {
   const value = { user, register, login, logout, initializing };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-export default AuthProvider;
