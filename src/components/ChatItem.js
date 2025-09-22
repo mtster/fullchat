@@ -2,9 +2,11 @@
 import React from "react";
 
 export default function ChatItem({ chat }) {
-  const lastMsg = chat.lastMessage || "";
-  const ts = chat.lastMessageAt ? new Date(chat.lastMessageAt) : null;
+  const lastMsg = chat && chat.lastMessage ? chat.lastMessage : "";
+  const ts = chat && chat.lastMessageAt ? new Date(chat.lastMessageAt) : null;
   const timeStr = ts ? ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+
+  const title = chat && (chat.name || (Array.isArray(chat.participantUsernames) ? chat.participantUsernames.join(", ") : ""));
 
   return (
     <div style={{
@@ -16,7 +18,7 @@ export default function ChatItem({ chat }) {
       cursor: "pointer"
     }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600 }}>{chat.name || (chat.participantUsernames && chat.participantUsernames.join(", "))}</div>
+        <div style={{ fontWeight: 600 }}>{title}</div>
         <div style={{ color: "#666", marginTop: 6, fontSize: 14 }}>
           {lastMsg ? (lastMsg.length > 60 ? lastMsg.slice(0, 60) + "…" : lastMsg) : "No messages yet"}
         </div>
