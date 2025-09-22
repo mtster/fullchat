@@ -1,26 +1,27 @@
 // src/components/ChatItem.js
 import React from "react";
-import { useNavigate, useLocation } from "react-router-dom";
 
 export default function ChatItem({ chat }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  const openChat = () => {
-    localStorage.setItem("lastChat", chat.id);
-    navigate(`/chats/${chat.id}`);
-  };
-
-  const ts = chat.timestamp && chat.timestamp.toDate ? chat.timestamp.toDate() : (chat.timestamp ? new Date(chat.timestamp.seconds * 1000) : null);
-  const time = ts ? ts.toLocaleString() : "";
+  const lastMsg = chat.lastMessage || "";
+  const ts = chat.lastMessageAt ? new Date(chat.lastMessageAt) : null;
+  const timeStr = ts ? ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
 
   return (
-    <div className="chat-item" onClick={openChat}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-        <div className="chat-title">{chat.chatName || "Chat"}</div>
-        <div style={{fontSize:12, color:"var(--muted)"}}>{time}</div>
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      padding: "12px 8px",
+      borderBottom: "1px solid #eee",
+      background: "transparent",
+      cursor: "pointer"
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600 }}>{chat.name || (chat.participantUsernames && chat.participantUsernames.join(", "))}</div>
+        <div style={{ color: "#666", marginTop: 6, fontSize: 14 }}>
+          {lastMsg ? (lastMsg.length > 60 ? lastMsg.slice(0, 60) + "…" : lastMsg) : "No messages yet"}
+        </div>
       </div>
-      <div className="chat-preview">{chat.lastMessage || "No messages yet"}</div>
+      <div style={{ marginLeft: 12, fontSize: 12, color: "#999" }}>{timeStr}</div>
     </div>
   );
 }
