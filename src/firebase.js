@@ -1,8 +1,6 @@
-// src/firebase.js
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getFirestore, serverTimestamp } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
-import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyA-FwUy8WLXiYtT46F0f59gr461cEI_zmo",
@@ -14,17 +12,12 @@ const firebaseConfig = {
   appId: "1:969101904718:web:8dcd0bc8690649235cec1f"
 };
 
-// Make sure app isn’t initialized more than once
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = initializeApp(firebaseConfig);
 
-// Both databases
-export const db = getDatabase(app);         // Realtime Database
-export const firestore = getFirestore(app); // Firestore (if you still need it)
+// Firestore
+const db = getFirestore(app);
 
-// Auth (for login/register if you extend later)
-export const auth = getAuth(app);
+// Realtime Database
+const rtdb = getDatabase(app);
 
-// Utility
-export { serverTimestamp };
-
-export default app;
+export { app, db, rtdb, serverTimestamp };
