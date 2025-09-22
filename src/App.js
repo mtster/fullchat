@@ -6,7 +6,7 @@ import Login from "./components/Login";
 import Register from "./components/Register";
 import ChatList from "./components/ChatList";
 import ChatView from "./components/ChatView";
-import Header from "./components/Header";
+// Header import intentionally removed from rendering to avoid duplicate top bars
 
 function PrivateRoute({ children }) {
   const { user } = useAuth();
@@ -20,18 +20,25 @@ function PrivateRoute({ children }) {
 function AppRoutes() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   React.useEffect(() => {
-    // Resume last chat if user returns
-    if (user) {
-      const lastChat = localStorage.getItem("lastChat");
-      if (lastChat) {
-        navigate(`/chats/${lastChat}`, { replace: true });
-      } else {
-        navigate("/chats", { replace: true });
-      }
+    // Resume last chat if user returns, but only when on entry-ish routes
+    // (avoid redirecting when user is already viewing a chat or other internal pages)
+    if (!user) return;
+
+    const entryPaths = ["/", "/login", "/register"];
+    if (!entryPaths.includes(location.pathname)) {
+      return;
     }
-  }, [user, navigate]);
+
+    const lastChat = localStorage.getItem("lastChat");
+    if (lastChat) {
+      navigate(`/chats/${lastChat}`, { replace: true });
+    } else {
+      navigate("/chats", { replace: true });
+    }
+  }, [user, navigate, location.pathname]);
 
   return (
     <Routes>
@@ -39,32 +46,27 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 
-      <Route path="/chats" element={
-        <PrivateRoute>
-          <div className="app">
+      {/* Main chat list page: only the ChatList (full page) */}
+      <Route
+        path="/chats"
+        element={
+          <PrivateRoute>
             <ChatList />
-            <div className="right">
-              <Header />
-              <div style={{ padding: 20, color: "var(--muted)" }}>
-                Select a chat from the left or create a new chat.
-              </div>
-            </div>
-          </div>
-        </PrivateRoute>
-      } />
+          </PrivateRoute>
+        }
+      />
 
-      <Route path="/chats/:chatId" element={
-        <PrivateRoute>
-          <div className="app">
-            <ChatList />
-            <div className="right">
-              <Header />
-              <ChatView />
-            </div>
-          </div>
-        </PrivateRoute>
-      } />
-      <Route path="*" element={<div style={{padding:30}}>404 - Not Found</div>} />
+      {/* Full-page chat view: dedicated page for one chat */}
+      <Route
+        path="/chats/:chatId"
+        element={
+          <PrivateRoute>
+            <ChatView />
+          </PrivateRoute>
+        }
+      />
+
+      <Route path="*" element={<div style={{ padding: 30 }}>404 - Not Found</div>} />
     </Routes>
   );
 }
