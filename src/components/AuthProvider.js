@@ -1,19 +1,18 @@
 // src/components/AuthProvider.js
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { db, serverTimestamp } from "../firebase";
+import { getApp } from "firebase/app";
 import {
-  collection,
+  getDatabase,
+  ref,
+  push,
+  set,
+  get,
   query,
-  where,
-  getDocs,
-  addDoc,
-  onSnapshot,
-  doc,
-  getDoc
-} from "firebase/firestore";
+  orderByChild,
+  equalTo,
+} from "firebase/database";
 
 const AuthContext = createContext();
-
 export function useAuth() {
   return useContext(AuthContext);
 }
@@ -21,23 +20,20 @@ export function useAuth() {
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // { id, username }
   const [initializing, setInitializing] = useState(true);
+  const app = getApp(); // uses already-initialized app from your src/firebase.js
+  const rdb = getDatabase(app);
 
   useEffect(() => {
-    // load from localStorage if present
     try {
       const s = localStorage.getItem("frbs_user");
-      if (s) {
-        setUser(JSON.parse(s));
-      }
+      if (s) setUser(JSON.parse(s));
     } catch (err) {
-      console.warn("AuthProvider: failed to parse local storage user", err);
+      console.warn("AuthProvider: localStorage parse failed", err);
     } finally {
       setInitializing(false);
     }
   }, []);
 
-  // register: create a user document in Firestore in `users` collection
-  // returns created user object or throws Error
   const register = async ({ username, password }) => {
     username = (username || "").trim();
     password = (password || "").trim();
@@ -46,30 +42,32 @@ export default function AuthProvider({ children }) {
     }
 
     // Check username availability
-    const usersRef = collection(db, "users");
-    const q = query(usersRef, where("username", "==", username));
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
+    const usersRef = ref(rdb, "users");
+    const q = query(usersRef, orderByChild("username"), equalTo(username));
+    const snap = await get(q);
+    if (snap.exists()) {
       throw new Error("User already exists.");
     }
 
-    // Create user doc
+    // Create user entry
+    const newUserRef = push(usersRef);
+    const uid = newUserRef.key;
     const payload = {
       username,
-      password, // NOTE: original project stores plaintext. Keep same behavior.
-      createdAt: serverTimestamp()
+      password, // plain text to stay consistent with existing app behavior
+      createdAt: Date.now(),
     };
-    const docRef = await addDoc(usersRef, payload);
+    await set(newUserRef, payload);
 
-    const created = { id: docRef.id, username };
+    const created = { id: uid, username };
 
-    // persist locally (session)
+    // Persist locally and set as logged in
     localStorage.setItem("frbs_user", JSON.stringify(created));
     setUser(created);
+
     return created;
   };
 
-  // login: match username + password against Firestore users
   const login = async ({ username, password }) => {
     username = (username || "").trim();
     password = (password || "").trim();
@@ -77,22 +75,23 @@ export default function AuthProvider({ children }) {
       throw new Error("Username and password are required.");
     }
 
-    const usersRef = collection(db, "users");
-    const q = query(usersRef, where("username", "==", username));
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) {
+    const usersRef = ref(rdb, "users");
+    const q = query(usersRef, orderByChild("username"), equalTo(username));
+    const snap = await get(q);
+    if (!snap.exists()) {
       throw new Error("User not found.");
     }
 
-    // find a doc with matching password
+    // snap.val() is an object of matched users; find one with matching password
+    const val = snap.val();
     let found = null;
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.password === password) {
-        found = { id: docSnap.id, username: data.username };
+    for (const key of Object.keys(val)) {
+      const u = val[key];
+      if (u.password === password) {
+        found = { id: key, username: u.username };
+        break;
       }
-    });
-
+    }
     if (!found) {
       throw new Error("Invalid password.");
     }
@@ -109,6 +108,5 @@ export default function AuthProvider({ children }) {
   };
 
   const value = { user, register, login, logout, initializing };
-
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
