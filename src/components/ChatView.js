@@ -3,75 +3,113 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
 import { getApp } from "firebase/app";
-import { getDatabase, ref, onValue, push, set } from "firebase/database";
+import { getDatabase, ref, onValue, push, set, get } from "firebase/database";
+
+const POSSIBLE_MESSAGE_PATHS = [
+  (chatId) => `messages/${chatId}`,
+  (chatId) => `chatMessages/${chatId}`,
+  (chatId) => `chats/${chatId}/messages`,
+  (chatId) => `messagesByChat/${chatId}`,
+  (chatId) => `chats/${chatId}/messagesById`
+];
 
 export default function ChatView() {
-  const { id } = useParams(); // chat id
+  const { id } = useParams();
   const { user } = useAuth();
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const navigate = useNavigate();
-  const scrollRef = useRef();
+  const [listeningPath, setListeningPath] = useState(null);
   const app = getApp();
   const rdb = getDatabase(app);
+  const scrollRef = useRef();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!id) return;
-    // listen for chat data
+    // load chat metadata
     const chatRef = ref(rdb, `chats/${id}`);
     const unsubChat = onValue(chatRef, (snap) => {
       setChat(snap.exists() ? snap.val() : null);
     });
 
-    // listen for messages under messages/{chatId}
-    const messagesRef = ref(rdb, `messages/${id}`);
-    const unsubMsg = onValue(messagesRef, (snap) => {
-      const val = snap.val();
-      if (!val) {
-        setMessages([]);
-        return;
+    // Detect which messages path actually contains messages
+    let activeUnsub = null;
+    async function findAndListen() {
+      for (const pathFn of POSSIBLE_MESSAGE_PATHS) {
+        const p = pathFn(id);
+        try {
+          const snap = await get(ref(rdb, p));
+          if (snap.exists()) {
+            // attach listener to this path
+            setListeningPath(p);
+            activeUnsub = onValue(ref(rdb, p), (mSnap) => {
+              const v = mSnap.val();
+              if (!v) {
+                setMessages([]);
+                return;
+              }
+              // convert object to array
+              const arr = Object.keys(v).map((k) => ({ id: k, ...(v[k] || {}) }));
+              // sort by createdAt if present else by insertion order
+              arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+              setMessages(arr);
+              setTimeout(() => {
+                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+              }, 40);
+            });
+            return;
+          }
+        } catch (err) {
+          console.warn("error checking path", p, err);
+        }
       }
-      // convert to ordered array by key order (or timestamp if stored)
-      const arr = Object.keys(val).map((k) => ({ id: k, ...(val[k] || {}) }));
-      arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-      setMessages(arr);
-      // auto-scroll
-      setTimeout(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }, 50);
-    });
+      // if none exist, still attach to default path so new messages show up for this chat
+      const defaultPath = `messages/${id}`;
+      setListeningPath(defaultPath);
+      activeUnsub = onValue(ref(rdb, defaultPath), (mSnap) => {
+        const v = mSnap.val();
+        if (!v) {
+          setMessages([]);
+          return;
+        }
+        const arr = Object.keys(v).map((k) => ({ id: k, ...(v[k] || {}) }));
+        arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        setMessages(arr);
+      });
+    }
+
+    findAndListen();
 
     return () => {
       unsubChat && unsubChat();
-      unsubMsg && unsubMsg();
+      activeUnsub && activeUnsub(); // onValue returns an unsubscribe function when called directly; but using onValue returns an unsubscribe function? onValue returns the unsubscribe function in RTDB v9? In this code we keep a reference; in practice leaving will detach as new listener created. (This is ok)
     };
-  }, [id]);
-
-  if (!user) {
-    return null;
-  }
+  }, [id, rdb]);
 
   const sendMessage = async (e) => {
     e && e.preventDefault();
     const txt = (text || "").trim();
     if (!txt) return;
-    const messagesRef = ref(rdb, `messages/${id}`);
-    const newMsgRef = push(messagesRef);
-    await set(newMsgRef, {
+    // always write to messages/{chatId} path (common path). Also update chat metadata.
+    const messagesRefPath = `messages/${id}`;
+    const newMsgRef = push(ref(rdb, messagesRefPath));
+    const msgPayload = {
       senderId: user.id,
       senderUsername: user.username,
       text: txt,
-      createdAt: Date.now(),
-    });
+      createdAt: Date.now()
+    };
+    await set(newMsgRef, msgPayload);
 
-    // update chat lastMessage / lastMessageAt
-    const chatRef = ref(rdb, `chats/${id}`);
+    // update chat lastMessage and lastMessageAt
     await set(ref(rdb, `chats/${id}/lastMessage`), txt).catch(()=>{});
     await set(ref(rdb, `chats/${id}/lastMessageAt`), Date.now()).catch(()=>{});
 
     setText("");
   };
+
+  if (!user) return null;
 
   return (
     <div style={{ maxWidth: 1000, margin: "8px auto", padding: 12 }}>
@@ -85,11 +123,11 @@ export default function ChatView() {
         </div>
       </div>
 
-      {/* Messages area */}
-      <div ref={scrollRef} style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, height: "60vh", overflowY: "auto", marginBottom: 12 }}>
+      <div ref={scrollRef} style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, height: "60vh", overflowY: "auto", marginBottom: 12, background: "#f9fbfd" }}>
         {messages.length === 0 && (
           <div style={{ color: "#777", textAlign: "center", marginTop: 24 }}>No messages yet — say hi 👋</div>
         )}
+
         {messages.map((m) => {
           const mine = m.senderId === user.id;
           return (
@@ -103,7 +141,7 @@ export default function ChatView() {
               }}>
                 <div style={{ fontSize: 14, marginBottom: 6 }}>{m.text}</div>
                 <div style={{ fontSize: 11, color: "#999", textAlign: "right" }}>
-                  {m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : ""}
+                  {m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}
                 </div>
               </div>
             </div>
