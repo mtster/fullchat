@@ -14,7 +14,7 @@ const POSSIBLE_MESSAGE_PATHS = [
 ];
 
 export default function ChatView() {
-  const { id } = useParams();
+  const { chatId } = useParams();
   const { user } = useAuth();
   const [chat, setChat] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -26,9 +26,9 @@ export default function ChatView() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!id) return;
+    if (!chatId) return;
     // load chat metadata
-    const chatRef = ref(rdb, `chats/${id}`);
+    const chatRef = ref(rdb, `chats/${chatId}`);
     const unsubChat = onValue(chatRef, (snap) => {
       setChat(snap.exists() ? snap.val() : null);
     });
@@ -37,7 +37,7 @@ export default function ChatView() {
     let activeUnsub = null;
     async function findAndListen() {
       for (const pathFn of POSSIBLE_MESSAGE_PATHS) {
-        const p = pathFn(id);
+        const p = pathFn(chatId);
         try {
           const snap = await get(ref(rdb, p));
           if (snap.exists()) {
@@ -49,9 +49,7 @@ export default function ChatView() {
                 setMessages([]);
                 return;
               }
-              // convert object to array
               const arr = Object.keys(v).map((k) => ({ id: k, ...(v[k] || {}) }));
-              // sort by createdAt if present else by insertion order
               arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
               setMessages(arr);
               setTimeout(() => {
@@ -65,7 +63,7 @@ export default function ChatView() {
         }
       }
       // if none exist, still attach to default path so new messages show up for this chat
-      const defaultPath = `messages/${id}`;
+      const defaultPath = `messages/${chatId}`;
       setListeningPath(defaultPath);
       activeUnsub = onValue(ref(rdb, defaultPath), (mSnap) => {
         const v = mSnap.val();
@@ -83,16 +81,16 @@ export default function ChatView() {
 
     return () => {
       unsubChat && unsubChat();
-      activeUnsub && activeUnsub(); // onValue returns an unsubscribe function when called directly; but using onValue returns an unsubscribe function? onValue returns the unsubscribe function in RTDB v9? In this code we keep a reference; in practice leaving will detach as new listener created. (This is ok)
+      activeUnsub && activeUnsub();
     };
-  }, [id, rdb]);
+  }, [chatId, rdb]);
 
   const sendMessage = async (e) => {
     e && e.preventDefault();
     const txt = (text || "").trim();
     if (!txt) return;
-    // always write to messages/{chatId} path (common path). Also update chat metadata.
-    const messagesRefPath = `messages/${id}`;
+    // always write to messages/{chatId} path
+    const messagesRefPath = `messages/${chatId}`;
     const newMsgRef = push(ref(rdb, messagesRefPath));
     const msgPayload = {
       senderId: user.id,
@@ -103,8 +101,8 @@ export default function ChatView() {
     await set(newMsgRef, msgPayload);
 
     // update chat lastMessage and lastMessageAt
-    await set(ref(rdb, `chats/${id}/lastMessage`), txt).catch(()=>{});
-    await set(ref(rdb, `chats/${id}/lastMessageAt`), Date.now()).catch(()=>{});
+    await set(ref(rdb, `chats/${chatId}/lastMessage`), txt).catch(()=>{});
+    await set(ref(rdb, `chats/${chatId}/lastMessageAt`), Date.now()).catch(()=>{});
 
     setText("");
   };
